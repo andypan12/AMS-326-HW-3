@@ -1,0 +1,203 @@
+"""
+Problem 3-2: 4-Leaf Rose Rectangular Cutter Optimization
+==========================================================================================
+Rose curve: r = sin(2θ),  Cartesian: (x²+y²)³ = 4x²y²
+Cutter: rectangle of sides 1 × 1/√2, placed at center (cx, cy), rotated by angle α.
+
+Strategy: Monte Carlo integration to compute area of rose cut by the rectangle,
+then gradient-free optimization (random restart hill-climbing) to maximize it.
+"""
+
+import random
+import math
+import csv
+
+# ── Constants ──────────────────────────────────────────────────────────────────
+RECT_L = 1.0                  # long side
+RECT_W = 1.0 / math.sqrt(2)  # short side  ≈ 0.7071
+
+# ── Rose curve helpers ─────────────────────────────────────────────────────────
+def in_rose(x, y):
+    """Return True if point (x,y) is inside the 4-leaf rose r = sin(2θ)."""
+    r2 = x*x + y*y
+    if r2 == 0:
+        return True
+    # (x²+y²)³ ≤ 4x²y²
+    return r2**3 <= 4 * x*x * y*y
+
+def in_rectangle(x, y, cx, cy, alpha):
+    """Return True if point (x,y) is inside the rotated rectangle."""
+    # Translate to rectangle centre, then rotate back by -alpha
+    dx = x - cx
+    dy = y - cy
+    cos_a = math.cos(alpha)
+    sin_a = math.sin(alpha)
+    lx = abs( dx * cos_a + dy * sin_a)   # along long axis
+    ly = abs(-dx * sin_a + dy * cos_a)   # along short axis
+    return lx <= RECT_L / 2 and ly <= RECT_W / 2
+
+# ── Monte Carlo area estimator ─────────────────────────────────────────────────
+def estimate_area(cx, cy, alpha, n_samples=50_000, seed=0):
+    """
+    Estimate the area of the rose that lies inside the rectangle,
+    using Monte Carlo sampling over the bounding box [-1.1, 1.1]².
+    """
+    rng = random.Random(seed)
+    box = 1.1
+    area_box = (2 * box) ** 2
+    count = 0
+    for _ in range(n_samples):
+        x = rng.uniform(-box, box)
+        y = rng.uniform(-box, box)
+        if in_rose(x, y) and in_rectangle(x, y, cx, cy, alpha):
+            count += 1
+    return (count / n_samples) * area_box
+
+# ── Hill-climbing optimizer ────────────────────────────────────────────────────
+def hill_climb(cx0, cy0, alpha0, n_eval=50_000, n_steps=300, seed=1):
+    """
+    Random-restart hill climbing in (cx, cy, alpha) space.
+    Returns (best_cx, best_cy, best_alpha, best_area).
+    """
+    rng = random.Random(seed)
+    best_cx, best_cy, best_alpha = cx0, cy0, alpha0
+    best_area = estimate_area(cx0, cy0, alpha0, n_samples=n_eval, seed=seed)
+
+    step_xy    = 0.05
+    step_alpha = math.pi / 12   # 15°
+
+    print(f"  Start: cx={cx0:.3f} cy={cy0:.3f} α={math.degrees(alpha0):.1f}°  area={best_area:.5f}")
+
+    for i in range(n_steps):
+        # Adaptive step decay
+        scale = max(0.1, 1 - i / n_steps)
+        dcx   = rng.uniform(-step_xy * scale,    step_xy * scale)
+        dcy   = rng.uniform(-step_xy * scale,    step_xy * scale)
+        da    = rng.uniform(-step_alpha * scale,  step_alpha * scale)
+
+        ncx   = best_cx + dcx
+        ncy   = best_cy + dcy
+        nalpha = best_alpha + da
+
+        area = estimate_area(ncx, ncy, nalpha, n_samples=n_eval, seed=rng.randint(0, 9999))
+        if area > best_area:
+            best_area  = area
+            best_cx, best_cy, best_alpha = ncx, ncy, nalpha
+            if (i+1) % 50 == 0:
+                print(f"  Step {i+1:3d}: cx={best_cx:.4f} cy={best_cy:.4f} "
+                      f"α={math.degrees(best_alpha):.1f}°  area={best_area:.5f}")
+
+    return best_cx, best_cy, best_alpha, best_area
+
+# ── ASCII heatmap helper ───────────────────────────────────────────────────────
+def ascii_heatmap(grid, x_vals, y_vals, title):
+    """Print an ASCII heatmap; grid[j][i] = value at (x_vals[i], y_vals[j])."""
+    flat = [v for row in grid for v in row]
+    lo, hi = min(flat), max(flat)
+    chars = " ░▒▓█"
+    nx = len(x_vals)
+    ny = len(y_vals)
+
+    print(f"\n  {title}")
+    for j in range(ny - 1, -1, -1):
+        row_str = ""
+        for i in range(nx):
+            v = grid[j][i]
+            idx = int((v - lo) / (hi - lo + 1e-12) * (len(chars) - 1))
+            row_str += chars[idx] * 2   # double-wide for aspect ratio
+        y_label = f"{y_vals[j]:+.2f}"
+        print(f"  {y_label} |{row_str}|")
+    # x-axis tick labels
+    x_ticks = "".join(f"{x:+.1f} "[0:2] for x in x_vals)
+    print(f"         +{'─'*(nx*2)}")
+    print(f"          {x_ticks}")
+    print(f"  (█ = high cut area,  space = low)")
+
+# ── Main ───────────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+
+    print("=" * 65)
+    print("  4-LEAF ROSE CUTTER OPTIMIZATION")
+    print(f"  Rectangle: {RECT_L:.4f} × {RECT_W:.4f}  (1 × 1/√2)")
+    print("=" * 65)
+
+    # ── 1. Heatmap: area vs (cx, cy) at α=0 ──────────────────────────────────
+    print("\n[1] Computing heatmap of area vs (cx, cy) at α = 0° ...")
+    HM_N   = 15          # grid resolution
+    HM_MC  = 20_000      # Monte Carlo samples per cell
+    span   = 0.8
+    hm_xs  = [span * (i / (HM_N-1) * 2 - 1) for i in range(HM_N)]
+    hm_ys  = [span * (i / (HM_N-1) * 2 - 1) for i in range(HM_N)]
+    hm_grid = [[0.0]*HM_N for _ in range(HM_N)]
+
+    for j, cy in enumerate(hm_ys):
+        for i, cx in enumerate(hm_xs):
+            hm_grid[j][i] = estimate_area(cx, cy, 0.0, n_samples=HM_MC, seed=i*100+j)
+        print(f"  Row {j+1:2d}/{HM_N} done", flush=True)
+
+    ascii_heatmap(hm_grid, hm_xs, hm_ys,
+                  "Area heatmap  (α=0°)")
+
+    # ── 2. Optimize from several random starts ─────────────────────────────────
+    print("\n[2] Hill-climbing optimization from multiple starts ...")
+
+    starts = [
+        (0.0,  0.0,  0.0),
+        (0.3,  0.3,  math.pi/4),
+        (-0.3, 0.2,  math.pi/6),
+        (0.1, -0.2,  math.pi/3),
+        (0.0,  0.0,  math.pi/2),
+    ]
+
+    all_results = []
+    for s, (cx0, cy0, a0) in enumerate(starts):
+        print(f"\n  --- Start {s+1}/{len(starts)} ---")
+        cx, cy, alpha, area = hill_climb(cx0, cy0, a0, n_eval=30_000, n_steps=200, seed=s*7)
+        all_results.append((area, cx, cy, alpha))
+        print(f"  → Best: cx={cx:.4f} cy={cy:.4f} α={math.degrees(alpha):.2f}°  area={area:.5f}")
+
+    all_results.sort(reverse=True)
+    best_area, best_cx, best_cy, best_alpha = all_results[0]
+
+    print("\n" + "=" * 65)
+    print("  GLOBAL BEST SOLUTION")
+    print("=" * 65)
+    print(f"  Center:    ({best_cx:.4f}, {best_cy:.4f})")
+    print(f"  Angle α:   {math.degrees(best_alpha):.2f}°")
+    print(f"  Cut area:  {best_area:.6f}")
+    print(f"  Rose area: ~{math.pi/2:.6f}  (exact = π/2 ≈ {math.pi/2:.4f})")
+    print(f"  Coverage:  {best_area/(math.pi/2)*100:.2f}%")
+
+    # ── 3. Area vs alpha at best (cx,cy) ──────────────────────────────────────
+    print("\n[3] Area vs angle α at optimal (cx, cy) ...")
+    alpha_vals = [math.radians(a) for a in range(0, 181, 10)]
+    area_vs_alpha = []
+    for alpha in alpha_vals:
+        a = estimate_area(best_cx, best_cy, alpha, n_samples=40_000, seed=42)
+        area_vs_alpha.append(a)
+
+    print("\n  α (deg) | Area    | Bar")
+    print("  " + "-"*55)
+    max_a = max(area_vs_alpha)
+    for alpha, area in zip(alpha_vals, area_vs_alpha):
+        bar = "█" * int(area / max_a * 35)
+        print(f"  {math.degrees(alpha):6.0f}° | {area:.5f} | {bar}")
+
+    # ── 4. Save CSV ────────────────────────────────────────────────────────────
+    csv_path = "rose_cutter_results.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["start", "cx", "cy", "alpha_deg", "area"])
+        for i, (area, cx, cy, alpha) in enumerate(all_results):
+            writer.writerow([i+1, f"{cx:.5f}", f"{cy:.5f}",
+                             f"{math.degrees(alpha):.2f}", f"{area:.6f}"])
+
+    csv2_path = "rose_area_vs_angle.csv"
+    with open(csv2_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["alpha_deg", "area"])
+        for alpha, area in zip(alpha_vals, area_vs_alpha):
+            writer.writerow([f"{math.degrees(alpha):.1f}", f"{area:.6f}"])
+
+    print(f"\n✓ Results saved to {csv_path} and {csv2_path}")
+    print("=" * 65)
