@@ -1,0 +1,209 @@
+"""
+Problem 3.3: Flying Plane Trajectory 
+=====================================================================
+A plane at (a, 0) flies toward airport at (0, 0) with speed v0 relative to wind.
+A south wind of speed w blows northward.
+
+ODE:  dy/dx = y/x - k * sqrt(1 + (y/x)^2)
+      y(x=a) = 0
+      k = w / v0
+
+Solved from x=a down to x≈0 using:
+  1. Euler's method
+  2. Improved Euler (Heun's method)
+  3. Runge-Kutta 4th order (RK4)
+
+Parameters: a=99.99, w=44.44, v0=88.88  → k = 44.44/88.88 = 0.5
+"""
+
+import math
+import csv
+
+# ── Parameters ─────────────────────────────────────────────────────────────────
+a  = 99.99
+w  = 44.44
+v0 = 88.88
+k  = w / v0          # = 0.5
+
+N_STEPS = 10_000     # number of steps (x goes from a down to ~0)
+X_STOP  = 0.01       # stop when x < this (avoid singularity at x=0)
+
+print("=" * 65)
+print("  FLYING PLANE TRAJECTORY  —  ODE Solver")
+print("=" * 65)
+print(f"  a  = {a},  w = {w},  v0 = {v0}")
+print(f"  k  = w/v0 = {k:.6f}")
+print(f"  IC : y(x={a}) = 0")
+print(f"  ODE: dy/dx = y/x - k*sqrt(1 + (y/x)^2)")
+print(f"  Steps: {N_STEPS},  x_stop: {X_STOP}")
+print("=" * 65)
+
+# ── ODE right-hand side ────────────────────────────────────────────────────────
+def f(x, y):
+    """dy/dx = y/x - k*sqrt(1 + (y/x)^2)"""
+    if abs(x) < 1e-14:
+        return float('inf')
+    ratio = y / x
+    return ratio - k * math.sqrt(1.0 + ratio * ratio)
+
+# ── Analytical solution ────────────────────────────────────────────────────────
+# Substitution u = y/x gives: x*du/dx = -k*sqrt(1+u^2)
+# → sinh^{-1}(u) = -k*ln(x) + C, with y(a)=0 → C = k*ln(a)
+# → y(x) = x * sinh(k * ln(a/x))
+def y_analytical(x):
+    if x <= 0:
+        return 0.0
+    return x * math.sinh(k * math.log(a / x))
+
+# ── Solvers ────────────────────────────────────────────────────────────────────
+def solve_euler(x0, y0, x_end, n):
+    h = (x_end - x0) / n    # h is negative (stepping left)
+    x, y = x0, y0
+    traj = [(x, y)]
+    for _ in range(n):
+        if x + h < X_STOP:
+            h = X_STOP - x
+        y = y + h * f(x, y)
+        x = x + h
+        traj.append((x, y))
+        if x <= X_STOP:
+            break
+    return traj
+
+def solve_heun(x0, y0, x_end, n):
+    h = (x_end - x0) / n
+    x, y = x0, y0
+    traj = [(x, y)]
+    for _ in range(n):
+        if x + h < X_STOP:
+            h = X_STOP - x
+        k1 = f(x, y)
+        k2 = f(x + h, y + h * k1)
+        y  = y + h * (k1 + k2) / 2.0
+        x  = x + h
+        traj.append((x, y))
+        if x <= X_STOP:
+            break
+    return traj
+
+def solve_rk4(x0, y0, x_end, n):
+    h = (x_end - x0) / n
+    x, y = x0, y0
+    traj = [(x, y)]
+    for _ in range(n):
+        if x + h < X_STOP:
+            h = X_STOP - x
+        k1 = f(x,         y)
+        k2 = f(x + h/2,   y + h/2 * k1)
+        k3 = f(x + h/2,   y + h/2 * k2)
+        k4 = f(x + h,     y + h   * k3)
+        y  = y + h * (k1 + 2*k2 + 2*k3 + k4) / 6.0
+        x  = x + h
+        traj.append((x, y))
+        if x <= X_STOP:
+            break
+    return traj
+
+# ── Run all three solvers ──────────────────────────────────────────────────────
+print("\nRunning solvers...")
+traj_euler = solve_euler(a, 0.0, X_STOP, N_STEPS)
+traj_heun  = solve_heun (a, 0.0, X_STOP, N_STEPS)
+traj_rk4   = solve_rk4  (a, 0.0, X_STOP, N_STEPS)
+
+# ── Print summary table ────────────────────────────────────────────────────────
+x_samples = [a, 80.0, 60.0, 40.0, 20.0, 10.0, 5.0, 2.0, 1.0, X_STOP]
+
+def interp(traj, x_target):
+    """Linear interpolation of y at x_target from trajectory list."""
+    for i in range(len(traj)-1):
+        x0, y0 = traj[i]
+        x1, y1 = traj[i+1]
+        if min(x0,x1) <= x_target <= max(x0,x1):
+            t = (x_target - x0) / (x1 - x0) if x1 != x0 else 0
+            return y0 + t*(y1-y0)
+    return traj[-1][1]
+
+print(f"\n{'x':>8} {'Euler':>12} {'Heun':>12} {'RK4':>12} {'Analytical':>12}")
+print("  " + "-" * 60)
+for x in x_samples:
+    ye = interp(traj_euler, x)
+    yh = interp(traj_heun,  x)
+    yr = interp(traj_rk4,   x)
+    ya = y_analytical(x)
+    print(f"  {x:8.2f} {ye:12.5f} {yh:12.5f} {yr:12.5f} {ya:12.5f}")
+
+# Final landing point
+xe, ye = traj_euler[-1]
+xh, yh = traj_heun[-1]
+xr, yr = traj_rk4[-1]
+ya_end = y_analytical(X_STOP)
+print(f"\n  Landing y at x≈{X_STOP}:")
+print(f"    Euler:      y = {ye:.5f}")
+print(f"    Heun:       y = {yh:.5f}")
+print(f"    RK4:        y = {yr:.5f}")
+print(f"    Analytical: y = {ya_end:.5f}")
+
+# ── Error comparison ───────────────────────────────────────────────────────────
+print(f"\n  Max |error| vs analytical  (sampled at {len(x_samples)} points):")
+errs_e, errs_h, errs_r = [], [], []
+for x in x_samples:
+    ya = y_analytical(x)
+    errs_e.append(abs(interp(traj_euler, x) - ya))
+    errs_h.append(abs(interp(traj_heun,  x) - ya))
+    errs_r.append(abs(interp(traj_rk4,   x) - ya))
+print(f"    Euler:  {max(errs_e):.2e}")
+print(f"    Heun:   {max(errs_h):.2e}")
+print(f"    RK4:    {max(errs_r):.2e}")
+
+# ── ASCII trajectory plot ──────────────────────────────────────────────────────
+COLS, ROWS = 70, 25
+x_min, x_max = 0.0, a
+y_min = min(p[1] for p in traj_rk4)
+y_max = max(p[1] for p in traj_rk4) + 1
+
+def to_col(x): return int((x - x_min) / (x_max - x_min) * (COLS-1))
+def to_row(y): return ROWS-1 - int((y - y_min) / (y_max - y_min) * (ROWS-1))
+
+grid = [[" "]*COLS for _ in range(ROWS)]
+
+# Plot RK4 trajectory
+stride = max(1, len(traj_rk4)//500)
+for i in range(0, len(traj_rk4), stride):
+    x, y = traj_rk4[i]
+    c, r = to_col(x), to_row(y)
+    if 0 <= c < COLS and 0 <= r < ROWS:
+        grid[r][c] = "█"
+
+# Mark airport (0,0) and start (a,0)
+grid[to_row(0)][to_col(0)] = "A"       # airport
+grid[to_row(0)][to_col(a)] = "P"       # plane start
+
+print(f"\n  Plane Trajectory  (RK4)   k = {k:.4f}")
+print(f"  A = Airport (0,0)   P = Plane start ({a},0)")
+print(f"  {'─'*(COLS+2)}")
+for i, row in enumerate(grid):
+    y_val = y_max - i * (y_max - y_min) / (ROWS-1)
+    print(f"  {y_val:+6.1f} |{''.join(row)}|")
+print(f"  {'─'*(COLS+2)}")
+print(f"  x:      0{' '*(COLS-18)}a={a}")
+
+# ── Save CSV ───────────────────────────────────────────────────────────────────
+# Downsample to ~200 points for readability
+def downsample(traj, n=200):
+    step = max(1, len(traj)//n)
+    return traj[::step]
+
+csv_path = "plane_trajectory.csv"
+with open(csv_path, "w", newline="") as f:
+    writer = csv.writer(f)
+    writer.writerow(["x", "y_euler", "y_heun", "y_rk4", "y_analytical"])
+    # Use RK4 x-values as reference
+    for i, (xr, yr) in enumerate(downsample(traj_rk4)):
+        ye = interp(traj_euler, xr)
+        yh = interp(traj_heun,  xr)
+        ya = y_analytical(xr)
+        writer.writerow([f"{xr:.4f}", f"{ye:.6f}", f"{yh:.6f}",
+                         f"{yr:.6f}", f"{ya:.6f}"])
+
+print(f"\n✓ Trajectory saved to {csv_path}")
+print("=" * 65)
