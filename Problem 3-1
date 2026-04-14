@@ -1,0 +1,122 @@
+"""
+Buffon's Disc Monte Carlo Simulation 
+======================================================================
+Estimates the probability that a disc of diameter d crosses one or more
+parallel lines spaced w=1 apart, using n=4,444,444 random tosses.
+
+Results are printed to the console and saved as a plain CSV file.
+An ASCII chart is also printed for a quick visual in the terminal.
+"""
+
+import random
+import math
+import csv
+
+# ── Simulation parameters ──────────────────────────────────────────────────────
+W = 1           # line spacing
+N = 4_444_444   # number of tosses
+
+DIAMETERS = [1/10, 2/10, 3/10, 4/10, 5/10, 6/10, 7/10, 8/10,
+             9/10, 10/10, 15/10, 20/10, 30/10]
+
+# ── Core simulation ────────────────────────────────────────────────────────────
+def simulate_disc(d, w, n, seed=42):
+    """
+    Drop n discs of diameter d onto a surface with parallel lines spaced w apart.
+    Number of lines crossed = floor((y + r) / w) - floor((y - r) / w)
+    Returns a dict {k: probability}.
+    """
+    rng = random.Random(seed)
+    radius = d / 2
+    counts = {}
+    for _ in range(n):
+        y = rng.uniform(0, w)
+        k = math.floor((y + radius) / w) - math.floor((y - radius) / w)
+        counts[k] = counts.get(k, 0) + 1
+    return {k: v / n for k, v in counts.items()}
+
+# ── ASCII bar chart ────────────────────────────────────────────────────────────
+def ascii_bar(value, width=40):
+    filled = round(value * width)
+    return "█" * filled + "░" * (width - filled)
+
+# ── Run simulations ────────────────────────────────────────────────────────────
+results = {}
+for d in DIAMETERS:
+    print(f"Simulating d = {d:.2f} ...", flush=True)
+    results[d] = simulate_disc(d, W, N)
+
+# ── Print results & ASCII chart ────────────────────────────────────────────────
+print("\n" + "=" * 65)
+print(f"  BUFFON'S DISC SIMULATION   w={W}   n={N:,}")
+print("=" * 65)
+
+for d in DIAMETERS:
+    probs = results[d]
+    label = f"{d:.2f}" if d != int(d) else f"{int(d)}.00"
+    print(f"\n  d = {label}")
+    print(f"  {'-'*55}")
+    for k in sorted(probs):
+        if k == 0 and d >= W:
+            continue   # skip P(0) for large discs
+        p = probs[k]
+        bar = ascii_bar(p)
+        print(f"  P({k} line{'s' if k!=1 else ' '}) = {p*100:6.2f}%  {bar}")
+
+print("\n" + "=" * 65)
+
+# ── ASCII plot: P(≥1 line) vs d ────────────────────────────────────────────────
+PLOT_W, PLOT_H = 60, 20   # characters wide / tall
+
+print("\n  P(crosses ≥ 1 line) vs disc diameter d")
+print(f"  {'─'*PLOT_W}")
+
+p_vals = [1 - results[d].get(0, 0) for d in DIAMETERS]
+d_vals = DIAMETERS
+
+# Build a grid
+grid = [[" "] * PLOT_W for _ in range(PLOT_H)]
+
+d_min, d_max = 0, max(d_vals)
+
+def to_col(d):
+    return int((d - d_min) / (d_max - d_min) * (PLOT_W - 1))
+
+def to_row(p):
+    return PLOT_H - 1 - int(p * (PLOT_H - 1))
+
+# Plot analytical line (P = d/w for d <= 1, else 1)
+for col in range(PLOT_W):
+    d = d_min + col / (PLOT_W - 1) * (d_max - d_min)
+    p = min(d / W, 1.0)
+    row = to_row(p)
+    if 0 <= row < PLOT_H:
+        grid[row][col] = "·"
+
+# Plot simulated points
+for d, p in zip(d_vals, p_vals):
+    col = to_col(d)
+    row = to_row(p)
+    if 0 <= row < PLOT_H and 0 <= col < PLOT_W:
+        grid[row][col] = "●"
+
+# Print with y-axis labels
+for i, row in enumerate(grid):
+    p_label = 1.0 - i / (PLOT_H - 1)
+    print(f"  {p_label*100:5.0f}% |{''.join(row)}")
+
+# x-axis
+print(f"         +{'─'*PLOT_W}")
+print(f"          0{'d (diameter)':>{PLOT_W-1}}")
+print(f"\n  Legend:  ● simulated    · analytical (d/w)")
+
+# ── Save CSV ───────────────────────────────────────────────────────────────────
+csv_path = "buffons_disc_results.csv"
+with open(csv_path, "w", newline="") as f:
+    writer = csv.writer(f)
+    writer.writerow(["diameter_d", "k_lines_crossed", "probability"])
+    for d in DIAMETERS:
+        for k, p in sorted(results[d].items()):
+            writer.writerow([f"{d:.2f}", k, f"{p:.6f}"])
+
+print(f"\n✓ Results saved to {csv_path}")
